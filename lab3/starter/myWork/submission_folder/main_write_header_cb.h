@@ -76,7 +76,7 @@ size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata)
 {
     int realsize = size * nmemb;
     RECV_BUF *p = userdata;
-    printf("response header : %s \n", p_recv);    
+    // printf("response header : %s \n", p_recv);    
     if (realsize > strlen(ECE252_HEADER) &&
 	strncmp(p_recv, ECE252_HEADER, strlen(ECE252_HEADER)) == 0) {
 
@@ -87,6 +87,22 @@ size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata)
     return realsize;
 }
 
+size_t write_cb_curl(char *p_recv, size_t size, size_t nmemb, void *p_userdata)
+{
+    size_t realsize = size * nmemb;
+    RECV_BUF *p = (RECV_BUF *)p_userdata;
+ 
+    if (p->size + realsize + 1 > p->max_size) {/* hope this rarely happens */ 
+        fprintf(stderr, "User buffer is too small, abort...\n");
+        abort();
+    }
+
+    memcpy(p->buf + p->size, p_recv, realsize); /*copy data from libcurl*/
+    p->size += realsize;
+    p->buf[p->size] = 0;
+
+    return realsize;
+}
 
 /**
  * @brief write callback function to save a copy of received data in RAM.
@@ -122,7 +138,19 @@ size_t write_cb_curl3(char *p_recv, size_t size, size_t nmemb, void *p_userdata)
     return realsize;
 }
 
-
+int shm_recv_buf_init(RECV_BUF *ptr, size_t nbytes)
+{
+    if ( ptr == NULL ) {
+        return 1;
+    }
+    
+    ptr->buf = (char *)ptr + sizeof(RECV_BUF);
+    ptr->size = 0;
+    ptr->max_size = nbytes;
+    ptr->seq = -1;              /* valid seq should be non-negative */
+    
+    return 0;
+}
 int recv_buf_init(RECV_BUF *ptr, size_t max_size)
 {
     void *p = NULL;
@@ -191,7 +219,7 @@ int write_file(const char *path, const void *in, size_t len)
 }
 
 
-int main( int argc, char** argv ) 
+int main_dupe( int argc, char** argv ) 
 {
     CURL *curl_handle;
     CURLcode res;
@@ -254,4 +282,4 @@ int main( int argc, char** argv )
     curl_global_cleanup();
     recv_buf_cleanup(&recv_buf);
     return 0;
-} 
+}

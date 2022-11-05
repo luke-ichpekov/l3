@@ -1,11 +1,7 @@
 /*
- * The code is derived from cURL example and paster.c base code.
- * The cURL example is at URL:
+ * The code is based on the cURL example at URL:
  * https://curl.haxx.se/libcurl/c/getinmemory.html
  * Copyright (C) 1998 - 2018, Daniel Stenberg, <daniel@haxx.se>, et al..
- *
- * The paster.c code is 
- * Copyright 2013 Patrick Lam, <p23lam@uwaterloo.ca>.
  *
  * Modifications to the code are
  * Copyright 2018-2019, Yiqing Huang, <yqhuang@uwaterloo.ca>.
@@ -14,10 +10,9 @@
  */
 
 /** 
- * @file main_wirte_read_cb.c
+ * @file main_wirte_callback.c
  * @brief cURL write call back to save received data in a user defined memory first
  *        and then write the data to a file for verification purpose.
- *        cURL header call back extracts data sequence number from header.
  * @see https://curl.haxx.se/libcurl/c/getinmemory.html
  * @see https://curl.haxx.se/libcurl/using/
  * @see https://ec.haxx.se/callback-write.html
@@ -33,7 +28,6 @@
 
 #define IMG_URL "http://ece252-1.uwaterloo.ca:2520/image?img=1"
 #define DUM_URL "https://example.com/"
-#define ECE252_HEADER "X-Ece252-Fragment: "
 #define BUF_SIZE 1048576  /* 1024*1024 = 1M */
 #define BUF_INC  524288   /* 1024*512  = 0.5M */
 
@@ -42,50 +36,17 @@
        __typeof__ (b) _b = (b); \
      _a > _b ? _a : _b; })
 
-typedef struct recv_buf2 {
+typedef struct recv_buf {
     char *buf;       /* memory to hold a copy of received data */
     size_t size;     /* size of valid data in buf in bytes*/
     size_t max_size; /* max capacity of buf in bytes*/
-    int seq;         /* >=0 sequence number extracted from http header */
-                     /* <0 indicates an invalid seq number */
 } RECV_BUF;
 
 
-size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata);
 size_t write_cb_curl3(char *p_recv, size_t size, size_t nmemb, void *p_userdata);
 int recv_buf_init(RECV_BUF *ptr, size_t max_size);
 int recv_buf_cleanup(RECV_BUF *ptr);
 int write_file(const char *path, const void *in, size_t len);
-
-
-/**
- * @brief  cURL header call back function to extract image sequence number from 
- *         http header data. An example header for image part n (assume n = 2) is:
- *         X-Ece252-Fragment: 2
- * @param  char *p_recv: header data delivered by cURL
- * @param  size_t size size of each memb
- * @param  size_t nmemb number of memb
- * @param  void *userdata user defined data structurea
- * @return size of header data received.
- * @details this routine will be invoked multiple times by the libcurl until the full
- * header data are received.  we are only interested in the ECE252_HEADER line 
- * received so that we can extract the image sequence number from it. This
- * explains the if block in the code.
- */
-size_t header_cb_curl(char *p_recv, size_t size, size_t nmemb, void *userdata)
-{
-    int realsize = size * nmemb;
-    RECV_BUF *p = userdata;
-    printf("response header : %s \n", p_recv);    
-    if (realsize > strlen(ECE252_HEADER) &&
-	strncmp(p_recv, ECE252_HEADER, strlen(ECE252_HEADER)) == 0) {
-
-        /* extract img sequence number */
-	p->seq = atoi(p_recv + strlen(ECE252_HEADER));
-
-    }
-    return realsize;
-}
 
 
 /**
@@ -139,7 +100,6 @@ int recv_buf_init(RECV_BUF *ptr, size_t max_size)
     ptr->buf = p;
     ptr->size = 0;
     ptr->max_size = max_size;
-    ptr->seq = -1;              /* valid seq should be non-negative */
     return 0;
 }
 
@@ -159,8 +119,8 @@ int recv_buf_cleanup(RECV_BUF *ptr)
 /**
  * @brief output data in memory to a file
  * @param path const char *, output file path
- * @param in  void *, input data to be written to the file
- * @param len size_t, length of the input data in bytes
+ * @param in  U8 *, input data to be written to the file
+ * @param len U64, length of the input data in bytes
  */
 
 int write_file(const char *path, const void *in, size_t len)
@@ -184,7 +144,7 @@ int write_file(const char *path, const void *in, size_t len)
     }
 
     if (fwrite(in, 1, len, fp) != len) {
-        fprintf(stderr, "write_file: imcomplete write!\n");
+        fprintf(stderr, "write_file: incomplete write!\n");
         return -3; 
     }
     return fclose(fp);
@@ -221,32 +181,25 @@ int main( int argc, char** argv )
 
     /* specify URL to get */
     curl_easy_setopt(curl_handle, CURLOPT_URL, url);
-
+    
     /* register write call back function to process received data */
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_cb_curl3); 
     /* user defined data structure passed to the call back function */
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void *)&recv_buf);
 
-    /* register header call back function to process received header data */
-    curl_easy_setopt(curl_handle, CURLOPT_HEADERFUNCTION, header_cb_curl); 
-    /* user defined data structure passed to the call back function */
-    curl_easy_setopt(curl_handle, CURLOPT_HEADERDATA, (void *)&recv_buf);
-
     /* some servers requires a user-agent field */
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 
-    
     /* get it! */
     res = curl_easy_perform(curl_handle);
 
     if( res != CURLE_OK) {
         fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
     } else {
-	printf("%lu bytes received in memory %p, seq=%d.\n", \
-               recv_buf.size, recv_buf.buf, recv_buf.seq);
+	printf("%lu bytes received in memory %p\n", recv_buf.size, recv_buf.buf);
     }
 
-    sprintf(fname, "./output_%d_%d.png", recv_buf.seq, pid);
+    sprintf(fname, "./output_%d.png", pid);
     write_file(fname, recv_buf.buf, recv_buf.size);
 
     /* cleaning up */
@@ -254,4 +207,4 @@ int main( int argc, char** argv )
     curl_global_cleanup();
     recv_buf_cleanup(&recv_buf);
     return 0;
-} 
+}
